@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#122f34">
+<meta name="description" content="Home trainer 3D avec cycliste articulé, décor OpenStreetMap et physique topographique réelle.">
+<title>Vélo 3D v70 · home trainer</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+<!-- Canvas 3D -->
+<canvas id="c" aria-label="Simulation 3D du parcours à vélo" tabindex="0"></canvas>
+
+<!-- HUD -->
+<button id="hudToggle" aria-label="Afficher toutes les données" aria-expanded="false">Données</button>
+<div id="hud" aria-label="Données de la sortie">
+  <div class="m"><b id="sp">0</b><i>km/h</i></div>
+  <div class="m"><b id="po">0</b><i>watts</i></div>
+  <div class="m"><b id="gr">0</b><i>pente %</i></div>
+  <div class="m"><b id="di">0.0</b><i>km</i></div>
+  <div class="m"><b id="du">00:00</b><i>durée</i></div>
+  <div class="m"><b id="avgSpeed">0.0</b><i>moy. km/h</i></div>
+  <div class="m"><b id="hr">–</b><i>bpm</i></div>
+  <div class="m"><b id="ca">–</b><i>tr/min</i></div>
+  <div class="m"><b id="kcal">0</b><i>kcal</i></div>
+</div>
+
+<!-- Mini-carte -->
+<aside id="mapPanel" aria-label="Mini-carte du parcours">
+  <div class="mapHead">
+    <span>🗺 CARTE · N↑</span>
+    <button id="mapMode" title="Vue globale">Tout</button>
+    <button id="mapClose" aria-label="Masquer">×</button>
+  </div>
+  <canvas id="miniMap" role="img" aria-label="Trace et position du cycliste, nord en haut"></canvas>
+  <div class="mapFoot">
+    <span id="mapScale">200 m</span>
+    <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OSM</a>
+  </div>
+  <div id="settlementSign" class="hide"><span id="settlementName"></span></div>
+</aside>
+<button id="mapToggle" class="hide" aria-label="Afficher la carte">🗺 Carte</button>
+
+<!-- Panneau direction (carrefour) -->
+<div id="directionPanel" role="dialog" aria-label="Choix de direction">
+  <div class="junction">
+    <span class="junctionLabel">Prochain carrefour</span>
+    <span class="junctionDistance" id="junctionDistance">200<small>m</small></span>
+    <div class="junctionBar"><div class="junctionBarFill" id="junctionBarFill"></div></div>
+  </div>
+  <div id="directionChoices"></div>
+</div>
+
+<!-- Panneau caméra -->
+<aside id="cameraPanel" aria-label="Réglages caméra">
+  <p class="panelTitle">Caméra · glisser pour pivoter</p>
+  <div class="row">
+    <button id="viewFollow" class="on">Suivi</button>
+    <button id="viewWide">Paysage</button>
+    <button id="viewSide">Profil</button>
+    <button id="viewCockpit">Cintre</button>
+  </div>
+  <div class="row zoomRow">
+    <button id="zoomOut" aria-label="Dézoomer">−</button>
+    <input id="zoom" type="range" min="1" max="12" step="0.5" value="7" aria-label="Zoom">
+    <button id="zoomIn" aria-label="Zoomer">+</button>
+  </div>
+  <span id="zoomValue">Caméra à 6 m</span>
+</aside>
+
+<!-- Barre de contrôle -->
+<div id="bar">
+  <div id="msg" role="status">Choisis un parcours pour commencer.</div>
+  <div class="row" id="sl">
+    <label for="pw">Puissance <b id="pv">0</b> W</label>
+    <input id="pw" type="range" min="0" max="600" step="5" value="0">
+    <select id="postureMode" aria-label="Posture du cycliste" title="Posture">
+      <option value="auto">Auto</option>
+      <option value="seated">Assis</option>
+      <option value="standing">Danseuse</option>
+      <option value="aero">Aéro</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="pause">Pause</button>
+    <button id="stopBtn" title="Arrêter">⏹️</button>
+    <button id="turnAround" disabled>↶ Demi-tour</button>
+    <button id="fsBtn" title="Plein écran">⛶</button>
+    <button id="bt">Trainer</button>
+    <button id="hb">Cardio</button>
+    <button id="mn">Menu</button>
+    <button id="quitBtn" title="Quitter">✕</button>
+  </div>
+</div>
+
+<!-- Input fichier caché -->
+<input id="fi" type="file" accept=".gpx,.xml,application/gpx+xml,text/xml,application/xml" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
+
+<!-- ═══ PAGE D'ACCUEIL ═══ -->
+<div id="home">
+  <div class="homeCard">
+    <div class="homeHero">
+      <div class="eyebrow">Home trainer 3D · OpenStreetMap</div>
+      <h1>Vélo 3D<span class="dot">.</span></h1>
+      <p class="subtitle">Roule sur toutes les routes, exclus chemins et voies sans issue. Physique réelle : descente = roue libre, montée = effort. Le chrono démarre à la 1ʳᵉ watt.</p>
+    </div>
+
+    <div class="homeTabs" role="tablist">
+      <button class="homeTab active" data-tab="ride" role="tab">🚴 Rouler</button>
+      <button class="homeTab" data-tab="style" role="tab">🎨 Apparence</button>
+      <button class="homeTab" data-tab="settings" role="tab">⚙️ Paramètres</button>
+    </div>
+
+    <!-- Onglet Rouler -->
+    <div class="homePanel active" data-panel="ride">
+      <div class="row">
+        <button id="gp">📁 Choisir un GPX</button>
+        <button id="pg">📋 Coller GPX</button>
+      </div>
+      <button id="dm" class="wide">▶ Essayer la démonstration</button>
+
+      <details style="margin:14px 0;border:1px solid var(--bd);border-radius:12px;padding:12px">
+        <summary style="cursor:pointer;font-size:13px;font-weight:700">🗺 Rouler libre · choisir un secteur</summary>
+        <div style="font-size:12px;color:var(--muted);margin:8px 0">Clique sur la carte. Rayon max 5 km recommandé.</div>
+        <div id="freeMap" style="width:100%;height:220px;border-radius:10px;border:1px solid var(--bd);margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <select id="freeRadius" style="flex:1;padding:6px;border-radius:6px">
+            <option value="2000" selected>2 km — recommandé</option>
+            <option value="5000">5 km</option>
+            <option value="10000">10 km</option>
+          </select>
+          <button id="startFreeRide">🚴 Rouler ici</button>
+          <button id="locateMe">📍 Me localiser</button>
+        </div>
+        <span id="freeInfo" style="font-size:11px;color:var(--muted);display:block;margin-top:6px">Secteur : Morville, Manche</span>
+      </details>
+
+      <div id="pb" role="progressbar" aria-label="Chargement" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <i id="pf"></i>
+      </div>
+      <div id="hs" role="status"></div>
+      <button id="go" class="wide primary" disabled>🚀 Lancer le parcours</button>
+      <button id="skipScenery" class="wide hide">Lancer sans attendre le décor</button>
+    </div>
+
+    <!-- Onglet Apparence -->
+    <div class="homePanel" data-panel="style">
+      <canvas id="previewCanvas" width="520" height="180" aria-label="Aperçu 3D du cycliste et du vélo"></canvas>
+      <small class="previewHint">👆 Fais glisser pour aligner le vélo importé. Couleurs appliquées en direct.</small>
+
+      <div class="settingsGroup">
+        <h3>Vélo</h3>
+        <div class="settingsGrid">
+          <div class="settingField">
+            <label for="frameColor">Couleur du cadre</label>
+            <input id="frameColor" type="color" value="#163e4b">
+          </div>
+          <div class="settingField">
+            <label for="rimColor">Couleur des jantes</label>
+            <input id="rimColor" type="color" value="#5b6670">
+          </div>
+          <div class="settingField">
+            <label for="rimDepth">Profil jantes</label>
+            <select id="rimDepth">
+              <option value="50">50 mm</option>
+              <option value="60">60 mm</option>
+              <option value="80">80 mm</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="settingsGroup">
+        <h3>Tenue</h3>
+        <div class="settingsGrid">
+          <div class="settingField">
+            <label for="jerseyColor">Maillot</label>
+            <input id="jerseyColor" type="color" value="#007d91">
+          </div>
+          <div class="settingField">
+            <label for="shortColor">Cuissard</label>
+            <input id="shortColor" type="color" value="#13171c">
+          </div>
+          <div class="settingField">
+            <label for="helmetColor">Casque</label>
+            <input id="helmetColor" type="color" value="#128f9a">
+          </div>
+          <div class="settingField">
+            <label for="shoeColor">Chaussures</label>
+            <input id="shoeColor" type="color" value="#e2e6e4">
+          </div>
+          <div class="settingField">
+            <label for="sockColor">Chaussettes</label>
+            <input id="sockColor" type="color" value="#e7ecea">
+          </div>
+          <div class="settingField">
+            <label for="sunglassesStyle">Lunettes</label>
+            <select id="sunglassesStyle">
+              <option value="dark">Noires</option>
+              <option value="blue">Bleues miroir</option>
+              <option value="red">Rouges</option>
+              <option value="yellow">Jaunes</option>
+              <option value="none">Sans lunettes</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="settingsGroup">
+        <h3>Avatar · peau et cheveux</h3>
+        <div class="settingsGrid">
+          <div class="settingField">
+            <label for="skinColor">Couleur de peau</label>
+            <input id="skinColor" type="color" value="#c98a6b">
+          </div>
+          <div class="settingField">
+            <label for="hairColor">Cheveux</label>
+            <input id="hairColor" type="color" value="#2e1f14">
+          </div>
+          <div class="settingField">
+            <label for="hairStyle">Style cheveux</label>
+            <select id="hairStyle">
+              <option value="short">Court</option>
+              <option value="long">Long</option>
+              <option value="buzz">Rasé</option>
+              <option value="bald">Chauve</option>
+            </select>
+          </div>
+          <div class="settingField">
+            <label for="beardStyle">Barbe</label>
+            <select id="beardStyle">
+              <option value="none">Aucune</option>
+              <option value="stubble">Trois jours</option>
+              <option value="full">Pleine</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button id="resetStyle" class="wide">↺ Réinitialiser les couleurs</button>
+
+      <div class="settingsGroup">
+        <h3>Modèles 3D (optionnel)</h3>
+        <label class="settingField">
+          <span>Avatar .GLB</span>
+          <input id="avatarFile" type="file" accept=".glb,.gltf">
+        </label>
+        <label class="settingField">
+          <span>Vélo .GLB</span>
+          <input id="bikeFile" type="file" accept=".glb,.gltf">
+        </label>
+        <button id="restoreBike" style="margin-top:6px;font-size:11px;min-height:32px">↺ Revenir au vélo d'origine</button>
+      </div>
+    </div>
+
+    <!-- Onglet Paramètres -->
+    <div class="homePanel" data-panel="settings">
+      <div class="settingsGroup">
+        <h3>Profil cycliste</h3>
+        <div class="settingsGrid">
+          <div class="settingField">
+            <label for="userWeight">Poids (kg)</label>
+            <input id="userWeight" type="number" min="30" max="150" step="1" value="75">
+          </div>
+          <div class="settingField">
+            <label for="userFTP">FTP (W)</label>
+            <input id="userFTP" type="number" min="80" max="500" step="5" value="220">
+          </div>
+          <div class="settingField">
+            <label for="userHRMax">FC max (bpm)</label>
+            <input id="userHRMax" type="number" min="120" max="220" step="1" value="185">
+          </div>
+          <div class="settingField">
+            <label for="userUnits">Unités</label>
+            <select id="userUnits">
+              <option value="metric">km/h, km</option>
+              <option value="imperial">mph, mi</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="settingsGroup">
+        <h3>Zones d'effort (calculées depuis le FTP)</h3>
+        <div id="zonesPreview" style="font-size:11px;color:var(--muted);line-height:1.8;background:rgba(0,0,0,.15);padding:10px;border-radius:8px"></div>
+      </div>
+
+      <details style="font-size:12px;color:var(--muted);margin-top:8px">
+        <summary style="cursor:pointer;color:var(--fg);font-weight:600">Comment ça marche ?</summary>
+        <p style="line-height:1.6;margin-top:8px">
+          <strong>Le poids</strong> influence la résistance à la pente (plus lourd = plus dur en montée, plus rapide en descente).<br>
+          <strong>Le FTP</strong> définit tes zones d'effort (Z1 → Z7), affichées colorées dans le HUD.<br>
+          <strong>La FC max</strong> colore le HUD cardiaque (vert = cool, rouge = effort max).<br>
+          <strong>La physique</strong> : en descente, tu continues à rouler même sans pédaler. En montée, il faut pédaler plus fort. Le chrono démarre à la 1ʳᵉ watt.
+        </p>
+        <p style="line-height:1.6">Tout est sauvegardé localement dans ton navigateur (localStorage). Aucun compte, aucune donnée envoyée.</p>
+      </details>
+
+      <button id="saveSettings" class="wide primary" style="margin-top:12px">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modale GPX collé -->
+<div id="pp" class="hide">
+  <label for="pt">Importer une trace GPX</label>
+  <textarea id="pt" spellcheck="false" placeholder="Collez ici le contenu complet du fichier GPX"></textarea>
+  <div id="pe" role="alert"></div>
+  <div class="row">
+    <button id="pl" class="primary">Charger</button>
+    <button id="px">Annuler</button>
+  </div>
+</div>
+
+<!-- Dialogue sens de départ (rouler libre) -->
+<div id="freeStartDialog" class="hide" role="dialog" aria-modal="true" aria-labelledby="freeStartTitle">
+  <section class="startCard">
+    <h2 id="freeStartTitle">Dans quel sens partir ?</h2>
+    <p id="freeStartInfo">Les deux directions sont prêtes.</p>
+    <div class="startCardActions">
+      <button id="startForward" class="primary">Continuer dans ce sens</button>
+      <button id="startReverse">Partir dans l'autre sens</button>
+    </div>
+  </section>
+</div>
+
+<!-- Dialogue arrêt -->
+<div id="stopDialog" class="hide" role="dialog" aria-modal="true" aria-labelledby="stopTitle">
+  <section class="stopCard">
+    <h2 id="stopTitle">Entraînement arrêté</h2>
+    <p id="stopInfo"></p>
+    <div class="stopActions">
+      <button id="exportFit" class="primary">⬇ Télécharger .FIT</button>
+      <button id="openStrava">Voir sur Strava ↗</button>
+      <button id="resumeStop" class="wideAction">▶ Reprendre l'entraînement</button>
+      <button id="quitStop" class="wideAction">⏹ Quitter et revenir à l'accueil</button>
+    </div>
+  </section>
+</div>
+
+<!-- Erreur fatale -->
+<div id="fatal" class="hide" role="alert">
+  <h2>Impossible de démarrer</h2>
+  <p id="fatalText"></p>
+</div>
+
+<!-- Librairies externes -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Application -->
+<script src="app.js"></script>
+
+</body>
+</html>
